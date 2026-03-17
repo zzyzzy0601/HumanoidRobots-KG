@@ -75,8 +75,8 @@ const RELATION_TEMPLATES = {
 
 // ====== Neo4j 数据库连接配置 ======
 const driver = neo4j.driver(
-    'bolt://localhost:7687', // Neo4j地址
-    neo4j.auth.basic('neo4j', 'Youbuding357')
+    'bolt://localhost:7687',
+    neo4j.auth.basic('neo4j', 'Your-password') //注意：修改为你的密码
 );
 
 // 测试Neo4j连接
