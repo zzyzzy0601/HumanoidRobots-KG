@@ -6,12 +6,12 @@ from neo4j import GraphDatabase, exceptions
 NEO4J_CONFIG = {
     "uri": "bolt://localhost:7687",
     "username": "neo4j",
-    "password": "Youbuding357",  
+    "password": "Your-password",  //注意：修改为你的密码
     "database": "neo4j"  
 }
 
 # JSON 爬虫数据文件路径
-JSON_FILE_PATH = "data.json"
+JSON_FILE_PATH = "data.json" 
 
 # ===================== 2. 标准属性模板定义 =====================
 # 节点模板：{标签: {属性名: 默认值}}
