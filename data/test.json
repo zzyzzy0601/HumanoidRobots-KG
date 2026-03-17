@@ -1,0 +1,24 @@
+{
+  "nodes": [
+    {
+      "label": "BodyPart",
+      "properties": {
+        "name": "HEESEUNG",
+        "DOF": "66666"
+      }
+    },
+    {
+      "label": "Robot",
+      "properties": {
+        "name": "Atlas",
+        "height": "1.9 米",
+        "weight": "90 公斤",
+        "release_year": "无",
+        "battery_life": "4 小时",
+        "payload": "持续负重30公斤；瞬间负重50公斤",
+        "description": "Atlas是一款身高1.9米、体重90公斤的人形机器人，具备瞬间50公斤和持续30公斤的负重能力，续航时间4小时，并能自主导航至充电站更换电池以实现持续运行。",
+        "product_type": "人形机器人"
+      }
+    }
+]
+}
