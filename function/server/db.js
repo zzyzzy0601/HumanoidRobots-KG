@@ -5,7 +5,7 @@ import mysql from 'mysql2/promise'; // 注意：ES模块用import，不是requir
 const pool = mysql.createPool({
   host: 'localhost',  
   user: 'root', 
-  password: '123456', 
+  password: 'Your-password', //注意：修改为你的密码
   database: 'robot_kg',  // 数据库名
   waitForConnections: true,
   connectionLimit: 10,
