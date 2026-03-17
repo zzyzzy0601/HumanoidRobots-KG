@@ -4,7 +4,8 @@
 ```
 python creator.py
 ```
-2. 配置 MySQL 数据库连接
+2. 配置数据库连接
+打开function/server/index.js文件，修改Neo4j数据库账户密码
 打开function/server/db.js文件，修改MySQL数据库账户密码
 
 3. 安装依赖并启动服务
