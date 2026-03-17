@@ -1,15 +1,18 @@
 ## 部署运行
 1. 初始化 Neo4j 数据库
+   
 进入项目根目录下的data文件夹，修改neo4j密码，再运行creator.py创建数据库
 ```
 python creator.py
 ```
 2. 配置数据库连接
+   
 打开function/server/index.js文件，修改Neo4j数据库账户密码
 
 打开function/server/db.js文件，修改MySQL数据库账户密码
 
-4. 安装依赖并启动服务
+3. 安装依赖并启动服务
+   
 进入function目录，安装项目依赖（首次运行）
 ```
 npm install
