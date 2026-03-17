@@ -4,7 +4,7 @@ from typing import Dict, List, Any
 from openai import OpenAI
 
 # ===================== 配置项 =====================
-DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', "sk-19d3a7b8976a4851bb36649fd07f084c")
+DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', "Your-API keys") //注意：修改为你的api keys（本项目使用deepseek api）
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 INPUT_JSON_PATH = "robot_specs_final.json"
 OUTPUT_JSON_PATH = "data222.json"
