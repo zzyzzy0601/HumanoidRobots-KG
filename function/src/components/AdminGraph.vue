@@ -25,8 +25,10 @@
         <div class="search-input-wrapper">
           <select v-model="searchType" class="search-select">
             <option value="name">节点名称</option>
-            <option value="group">标签</option>
-            <option value="property">属性值</option>
+            <option value="group">节点标签</option>
+            <option value="property">节点属性值</option>
+            <option value="edgeLabel">关系类型</option>
+            <option value="edgeProperty">关系属性值</option>
           </select>
           <input
             type="text"
@@ -38,9 +40,10 @@
           <button @click="handleSearch" class="search-btn">搜索</button>
           <button @click="resetSearch" class="reset-btn">重置</button>
         </div>
+        
         <!-- 高级筛选 -->
         <div class="advanced-filter">
-          <label class="filter-label">节点类型筛选：</label>
+          <label class="filter-label">标签筛选：</label>
           <div class="filter-tags">
             <span 
               v-for="type in allNodeTypes" 
@@ -53,20 +56,36 @@
             </span>
           </div>
         </div>
+        
         <!-- 搜索结果 -->
-        <div class="search-result" v-if="searchResults.length > 0 && searchKeyword">
+        <div class="search-result" v-if="(searchResults.length > 0 || relationSearchResults.length > 0) && searchKeyword">
+          
           <div 
             class="result-item"
             v-for="node in searchResults"
-            :key="node.id"
+            :key="'node-' + node.id"
             @click="highlightAndLocateNode(node)"
           >
-            {{ node.label }} [{{ node.group }}]
+          <span class="node-icon"></span> {{ node.label }} 
+            <span class="tags-badge">
+              [{{ (node.tags && node.tags.length > 0) ? node.tags.join(', ') : node.group }}]
+            </span>
+          </div>
+
+          <div 
+            class="result-item relation-result-item" 
+            v-for="edge in relationSearchResults"
+            :key="'edge-' + edge.id"
+            @click="showEdgeDetail(edge)" 
+          >
+            <span class="node-icon">{{ getNodeLabelById(edge.from) }}</span>
+            <span class="node-icon">→{{ edge.label }}→</span>
+            <span class="node-icon">{{ getNodeLabelById(edge.to) }}</span>
           </div>
         </div>
-        <!-- 无结果提示 -->
-        <div class="no-result" v-if="searchKeyword && searchResults.length === 0">
-          未找到匹配的节点
+
+        <div class="no-result" v-if="searchKeyword && searchResults.length === 0 && relationSearchResults.length === 0">
+          未找到匹配的内容
         </div>
       </div>
 
@@ -80,19 +99,53 @@
       <div class="panel-content">
         <div class="node-header">
           <h2 class="node-name">{{ selectedNode?.label || '未选择节点' }}</h2>
-          <span class="node-category">[{{ selectedNode?.group || '未知类型' }}]</span>
           <button @click="deleteNode" class="delete-node-btn danger-btn">删除该节点</button>
         </div>
 
+        <!-- 节点标签管理区域 -->
+        <div class="node-tags-section" v-if="selectedNode">
+          <h3 class="tags-title">节点标签管理</h3>
+          <!-- 现有标签展示 -->
+        <div class="tags-list">
+          <div 
+              v-for="(tag, index) in (selectedNode.tags && selectedNode.tags.length ? selectedNode.tags : [selectedNode.group])" 
+              :key="index" 
+              class="tag-item"
+            >
+            <span class="tag-text">{{ tag }}</span>
+            <button 
+              @click="deleteTag(index)" 
+              class="tag-delete-btn danger-btn"
+              :disabled="selectedNode.tags.length <= 1"
+            >×</button>
+          </div>
+        </div>
+          <!-- 新增标签输入 -->
+          <div class="add-tag-row">
+            <input 
+              v-model="newTagValue" 
+              placeholder="输入新标签（支持自定义）" 
+              class="new-tag-input"
+              @input="validateTag"
+            />
+            <span v-if="tagError" class="error-text">{{ tagError }}</span>
+            <button 
+              @click="addTag" 
+              class="add-tag-btn"
+              :disabled="!newTagValue || !!tagError"
+            >+ 添加标签</button>
+          </div>
+        </div>
         <!-- 管理员操作区 -->
         <div class="admin-actions" v-if="selectedNode">
           <h3 class="action-title">节点操作</h3>
           <button @click="showRelatedNodes" class="action-btn">查看关联节点</button>
         </div>
-
-<!-- 核心修改：适配本地路径的多媒体展示区域 -->
+        
+        <!-- 核心修改：适配本地路径的多媒体展示区域 -->
         <div class="node-media-section" v-if="selectedNode">
           <h3 class="media-title">多媒体资源</h3>
+          
           <!-- 图片展示（适配本地路径） -->
           <div class="media-images" v-if="getLocalMediaProperties(selectedNode).images.length > 0">
             <h4 class="sub-title">图片</h4>
@@ -174,6 +227,7 @@
                       <span v-else class="full-text">{{ value || '无' }}</span>
                       <div v-if="expandedKeys.has(key)" class="expanded-text">{{ value }}</div>
                     </template>
+                    
                     <!-- 数组类型 -->
                     <template v-else-if="Array.isArray(value)">
                       <span v-if="value.length > 5" class="truncated-text">
@@ -185,6 +239,7 @@
                       <span v-else class="full-text">{{ value.join(', ') || '空数组' }}</span>
                       <div v-if="expandedKeys.has(key)" class="expanded-text">{{ value.join(', ') }}</div>
                     </template>
+                    
                     <!-- 对象类型 -->
                     <template v-else-if="typeof value === 'object' && value !== null">
                       <span class="expand-btn" @click="toggleExpand(key)">
@@ -195,6 +250,7 @@
                       </div>
                       <span v-else class="full-text">Object (点击展开查看)</span>
                     </template>
+                    
                     <!-- 基础类型 -->
                     <template v-else>
                       <span class="full-text">
@@ -207,10 +263,12 @@
                     <button @click="deleteProperty(key)" class="delete-btn danger-btn">🗑️</button>
                   </td>
                 </tr>
+                
                 <!-- 无属性提示 -->
                 <tr v-if="Object.keys(getNodeOriginalProperties(selectedNode)).length === 0" class="empty-props-row">
                   <td colspan="3" class="empty-props-text">暂无属性信息（数据库中该节点无属性）</td>
                 </tr>
+                
                 <!-- 新增属性行 -->
                 <tr class="add-prop-row">
                   <td class="prop-key">
@@ -244,24 +302,145 @@
       </div>
     </div>
 
+    <!-- 右侧关系详情栏 -->
+    <div class="edge-detail-panel" :class="{ 'active': selectedEdge !== null }">
+      <div class="panel-close-btn" @click="selectedEdge = null">×</div>
+      <div class="panel-content">
+        <div class="edge-header">
+          <h2 class="edge-name">
+            {{ getNodeLabelById(selectedEdge?.from) }} → {{ selectedEdge?.label }} → {{ getNodeLabelById(selectedEdge?.to) }}
+          </h2>
+          <span class="edge-category">[关系类型: {{ selectedEdge?.label || '未知' }}]</span>
+          <button @click="deleteEdge" class="delete-edge-btn danger-btn">删除该关系</button>
+        </div>
+
+        <!-- 关系起始/终止节点快捷查看 -->
+        <div class="edge-node-links" v-if="selectedEdge">
+          <h3 class="action-title">关联节点</h3>
+          <button @click="highlightAndLocateNode(getNodeById(selectedEdge.from))" class="action-btn">
+            查看起始节点：{{ getNodeLabelById(selectedEdge.from) }}
+          </button>
+          <button @click="highlightAndLocateNode(getNodeById(selectedEdge.to))" class="action-btn">
+            查看终止节点：{{ getNodeLabelById(selectedEdge.to) }}
+          </button>
+        </div>
+
+        <!-- 关系属性增删改区域 -->
+        <div class="edge-props-section" v-if="selectedEdge">
+          <h3 class="props-title">关系属性</h3>
+          <div class="props-table-wrapper">
+            <table class="props-table">
+              <thead>
+                <tr>
+                  <th class="prop-key-th">属性名</th>
+                  <th class="prop-value-th">属性值</th>
+                  <th class="prop-op-th">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- 原有属性行 -->
+                <tr v-for="(value, key) in getEdgeOriginalProperties(selectedEdge)" :key="key" class="prop-row">
+                  <td class="prop-key">{{ key }}</td>
+                  <td class="prop-value">
+                    <!-- 字符串类型 -->
+                    <template v-if="typeof value === 'string'">
+                      <span v-if="value.length > 100" class="truncated-text">
+                        {{ value.slice(0, 100) }}...
+                        <span @click="toggleEdgeExpand(key)" class="expand-btn">
+                          {{ expandedEdgeKeys.has(key) ? '收起' : '展开' }}
+                        </span>
+                      </span>
+                      <span v-else class="full-text">{{ value || '无' }}</span>
+                      <div v-if="expandedEdgeKeys.has(key)" class="expanded-text">{{ value }}</div>
+                    </template>
+                    
+                    <!-- 数组类型 -->
+                    <template v-else-if="Array.isArray(value)">
+                      <span v-if="value.length > 5" class="truncated-text">
+                        {{ value.slice(0, 5).join(', ') }}... (共{{ value.length }}项)
+                        <span @click="toggleEdgeExpand(key)" class="expand-btn">
+                          {{ expandedEdgeKeys.has(key) ? '收起' : '展开' }}
+                        </span>
+                      </span>
+                      <span v-else class="full-text">{{ value.join(', ') || '空数组' }}</span>
+                      <div v-if="expandedEdgeKeys.has(key)" class="expanded-text">{{ value.join(', ') }}</div>
+                    </template>
+                    
+                    <!-- 对象类型 -->
+                    <template v-else-if="typeof value === 'object' && value !== null">
+                      <span class="expand-btn" @click="toggleEdgeExpand(key)">
+                        {{ expandedEdgeKeys.has(key) ? '收起JSON' : '展开JSON' }}
+                      </span>
+                      <div v-if="expandedEdgeKeys.has(key)" class="expanded-text">
+                        {{ JSON.stringify(value, null, 2) }}
+                      </div>
+                      <span v-else class="full-text">Object (点击展开查看)</span>
+                    </template>
+                    
+                    <!-- 基础类型 -->
+                    <template v-else>
+                      <span class="full-text">
+                        {{ value === null ? 'null' : value === undefined ? 'undefined' : value }}
+                      </span>
+                    </template>
+                  </td>
+                  <td class="prop-op-th">
+                    <button @click="editEdgeProperty(key)" class="edit-btn">编辑</button>
+                    <button @click="deleteEdgeProperty(key)" class="delete-btn danger-btn">🗑️</button>
+                  </td>
+                </tr>
+                
+                <!-- 无属性提示 -->
+                <tr v-if="Object.keys(getEdgeOriginalProperties(selectedEdge)).length === 0" class="empty-props-row">
+                  <td colspan="3" class="empty-props-text">暂无属性信息（数据库中该关系无属性）</td>
+                </tr>
+                
+                <!-- 新增属性行 -->
+                <tr class="add-prop-row">
+                  <td class="prop-key">
+                    <input 
+                      v-model="newEdgePropKey" 
+                      placeholder="属性名" 
+                      class="new-prop-input"
+                      @input="validateEdgePropKey"
+                    />
+                    <span v-if="edgePropKeyError" class="error-text">{{ edgePropKeyError }}</span>
+                  </td>
+                  <td class="prop-value">
+                    <input 
+                      v-model="newEdgePropValue" 
+                      placeholder="属性值" 
+                      class="new-prop-input"
+                    />
+                  </td>
+                  <td class="prop-op-th">
+                    <button 
+                      @click="addEdgeProperty" 
+                      class="add-btn"
+                      :disabled="!newEdgePropKey || !!edgePropKeyError"
+                    >+ 新增</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 添加节点面板（右侧滑出） -->
     <div class="add-node-panel" :class="{ 'active': showAddNodePanel }">
       <div class="panel-close-btn" @click="showAddNodePanel = false">×</div>
       <div class="panel-content">
         <h2 class="panel-title">新增节点</h2>
         <div class="form-item">
-          <label class="form-label">标签：</label>
-          <select v-model="newNodeGroup" class="form-select">
-            <option value="Robot">Robot（机器人）</option>
-            <option value="Company">Company（企业）</option>
-            <option value="BodyPart">BodyPart（身体部位）</option>
-            <option value="Application">Application（应用场景）</option>
-            <option value="Component">Component（核心组件）</option>
-            <option value="HardwareTech">HardwareTech（硬件技术）</option>
-            <option value="SoftwareTech">SoftwareTech（软件技术）</option>
-            <option value="ElectricalFeature">ElectricalFeature（电气特性）</option>
-            </select>
-        </div>
+  <label class="form-label">标签：</label>
+  <input 
+    v-model="newNodeGroup" 
+    placeholder="请输入节点标签（如：Robot）" 
+    class="form-input"
+  />
+</div>
         <div class="form-item">
           <label class="form-label">节点名称：</label>
           <input 
@@ -272,6 +451,7 @@
           />
           <span v-if="nodeNameError" class="error-text">{{ nodeNameError }}</span>
         </div>
+        
         <!-- 节点属性动态添加 -->
         <div class="props-section">
           <h3 class="props-subtitle">节点属性</h3>
@@ -292,6 +472,7 @@
           </div>
           <button @click="addNewNodeProp" class="add-prop-btn">+ 添加属性</button>
         </div>
+        
         <button 
           @click="submitAddNode" 
           class="submit-btn"
@@ -330,6 +511,7 @@
           />
           <span v-if="edgeLabelError" class="error-text">{{ edgeLabelError }}</span>
         </div>
+        
         <!-- 关系属性动态添加 -->
         <div class="props-section">
           <h3 class="props-subtitle">关系属性</h3>
@@ -350,6 +532,7 @@
           </div>
           <button @click="addNewEdgeProp" class="add-prop-btn">+ 添加属性</button>
         </div>
+        
         <button 
           @click="submitAddEdge" 
           class="submit-btn"
@@ -358,38 +541,32 @@
       </div>
     </div>
 
-
-
-
-     <!-- 图片预览弹窗 -->
-     <div class="image-preview-modal" v-if="previewImageUrl" @click="closeImagePreview">
-       <!-- 阻止点击图片区域触发关闭（事件冒泡） -->
-       <div class="preview-content" @click.stop>
-         <!-- 关闭按钮 -->
-         <span class="preview-close-btn" @click="closeImagePreview">×</span>
-         <!-- 预览图片：展示选中的图片URL -->
-         <img :src="previewImageUrl" alt="预览图片" class="preview-image" />
-       </div>
-     </div>
-
-<!-- 根容器末尾：右下角颜色示例框 -->
-<div class="color-example-panel-fixed">
-  <div class="color-example-title">标签颜色示例</div>
-  <div class="color-example-list">
-    <div 
-      class="color-example-item" 
-      v-for="(color, label) in nodeColorMap" 
-      :key="label"
-      v-if="label !== 'default'"
-    >
-      <span class="color-label">{{ label }}：</span>
-      <span class="color-box" :style="{ backgroundColor: color.background, borderColor: color.border }"></span>
+    <!-- 图片预览弹窗 -->
+    <div class="image-preview-modal" v-if="previewImageUrl" @click="closeImagePreview">
+      <!-- 阻止点击图片区域触发关闭（事件冒泡） -->
+      <div class="preview-content" @click.stop>
+        <!-- 关闭按钮 -->
+        <span class="preview-close-btn" @click="closeImagePreview">×</span>
+        <!-- 预览图片：展示选中的图片URL -->
+        <img :src="previewImageUrl" alt="预览图片" class="preview-image" />
+      </div>
     </div>
-  </div>
-</div>
 
-
-
+    <!-- 右下角颜色示例框 -->
+    <div class="color-example-panel-fixed">
+      <div class="color-example-title">标签颜色示例</div>
+      <div class="color-example-list">
+        <div 
+          class="color-example-item" 
+          v-for="(color, label) in nodeColorMap" 
+          :key="label"
+          v-if="label !== 'default'"
+        >
+          <span class="color-label">{{ label }}：</span>
+          <span class="color-box" :style="{ backgroundColor: color.background, borderColor: color.border }"></span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -405,8 +582,15 @@ import {
   deleteNodeProperty, 
   deleteNode as deleteNodeApi, 
   exportGraphData,
-  createNode, // 新增
-  createEdge
+  createNode,
+  createEdge,
+  addEdgeProperty as addEdgePropertyApi, 
+  updateEdgeProperty as updateEdgePropertyApi, 
+  deleteEdgeProperty as deleteEdgePropertyApi, 
+  deleteEdgeApi,
+  addNodeTagApi,
+  deleteNodeTagApi, 
+  updateNodeTagApi 
 } from '@/api/neo4jApi';
 
 const router = useRouter();
@@ -418,6 +602,14 @@ const graphContainer = ref(null);
 let network = null;
 const selectedNode = ref(null);
 const expandedKeys = ref(new Set());
+
+// 新增：关系相关变量
+const selectedEdge = ref(null);
+const expandedEdgeKeys = ref(new Set());
+// 关系属性新增相关
+const newEdgePropKey = ref('');
+const newEdgePropValue = ref('');
+const edgePropKeyError = ref('');
 
 const allNodes = ref([]);
 const allEdges = ref([]);
@@ -449,6 +641,157 @@ const newEdgeProps = ref([{ key: '', value: '' }]); // 新增关系属性
 const newEdgePropErrors = ref({}); // 新增关系属性错误提示
 const edgeLabelError = ref('');   // 关系类型错误提示
 const edgeNodeError = ref('');    // 关系节点选择错误提示
+
+// 节点标签相关
+const newTagValue = ref('');     // 新增标签值
+const tagError = ref('');        // 标签校验错误提示
+
+// 校验标签（非空、不重复）
+const validateTag = () => {
+  const tag = newTagValue.value.trim();
+  // 确保 currentTags 总是包含 group 和 tags 的合集
+  const currentTags = Array.isArray(selectedNode.value.tags) 
+    ? selectedNode.value.tags 
+    : (selectedNode.value.group ? [selectedNode.value.group] : []);
+  
+  if (!tag) {
+    tagError.value = '标签不能为空';
+    return;
+  }
+  if (currentTags.includes(tag)) {
+    tagError.value = '该标签已存在';
+    return;
+  }
+  tagError.value = '';
+};
+// 1. 添加节点标签
+const addTag = async () => {
+  if (!selectedNode.value || !newTagValue.value || tagError.value) return;
+  
+  const nodeId = selectedNode.value.id;
+  const newTag = newTagValue.value.trim();
+  // 处理标签数组（兼容原有单group字段）
+  const currentTags = selectedNode.value.tags || [selectedNode.value.group];
+  const updatedTags = [...currentTags, newTag];
+  
+  try {
+    // 调用添加标签API（需后端配合实现）
+    await addNodeTagApi(nodeId, newTag);
+    // 【关键修复】同步更新全局 allNodes 列表
+    const nodeInList = allNodes.value.find(n => n.id === nodeId);
+    if (nodeInList) {
+      nodeInList.tags = updatedTags; // 这样 computed 属性 allNodeTypes 才会重新运行
+    }
+    // 前端同步更新
+    selectedNode.value.tags = updatedTags;
+    // 更新图谱中节点的标签展示（如果需要）
+    network.body.data.nodes.update([{
+      id: nodeId,
+      tags: updatedTags,
+      // 保留原有核心字段
+      label: selectedNode.value.label,
+      group: selectedNode.value.group,
+      properties: selectedNode.value.properties
+    }]);
+    
+    // 清空输入框
+    newTagValue.value = '';
+    alert('标签添加成功！');
+  } catch (error) {
+    console.error('添加标签失败:', error);
+    alert(`添加失败：${error.message}`);
+  }
+};
+
+// 2. 删除节点标签
+const deleteTag = async (index) => {
+  if (!selectedNode.value) return;
+  
+  const currentTags = selectedNode.value.tags || [selectedNode.value.group];
+  // 至少保留1个标签
+  if (currentTags.length <= 1) {
+    alert('节点至少需要保留1个标签！');
+    return;
+  }
+  
+  const tagToDelete = currentTags[index];
+  const confirmDelete = confirm(`确认删除标签【${tagToDelete}】吗？`);
+  if (!confirmDelete) return;
+  
+  const nodeId = selectedNode.value.id;
+  try {
+    // 调用删除标签API（需后端配合实现）
+    await deleteNodeTagApi(nodeId, tagToDelete);
+    
+    // 前端同步更新
+    const updatedTags = currentTags.filter((_, i) => i !== index);
+    selectedNode.value.tags = updatedTags;
+    // 如果删除的是原group标签，更新group为第一个标签（可选）
+    if (tagToDelete === selectedNode.value.group) {
+      selectedNode.value.group = updatedTags[0];
+    }
+    // 更新图谱节点数据
+    network.body.data.nodes.update([{
+      id: nodeId,
+      tags: updatedTags,
+      group: selectedNode.value.group,
+      label: selectedNode.value.label,
+      properties: selectedNode.value.properties
+    }]);
+    
+    alert('标签删除成功！');
+  } catch (error) {
+    console.error('删除标签失败:', error);
+    alert(`删除失败：${error.message}`);
+  }
+};
+
+// 3. 编辑节点标签
+const editTag = async (index) => {
+  if (!selectedNode.value) return;
+  
+  const currentTags = selectedNode.value.tags || [selectedNode.value.group];
+  const oldTag = currentTags[index];
+  const newTag = prompt(`编辑标签【${oldTag}】`, oldTag);
+  
+  if (newTag === null || newTag.trim() === oldTag) return; // 取消编辑或无修改
+  if (!newTag.trim()) {
+    alert('标签不能为空！');
+    return;
+  }
+  if (currentTags.includes(newTag.trim()) && newTag.trim() !== oldTag) {
+    alert('该标签已存在！');
+    return;
+  }
+  
+  const nodeId = selectedNode.value.id;
+  try {
+    // 调用修改标签API（需后端配合实现）
+    await updateNodeTagApi(nodeId, oldTag, newTag.trim());
+    
+    // 前端同步更新
+    const updatedTags = [...currentTags];
+    updatedTags[index] = newTag.trim();
+    selectedNode.value.tags = updatedTags;
+    // 如果修改的是原group标签，更新group（可选）
+    if (oldTag === selectedNode.value.group) {
+      selectedNode.value.group = newTag.trim();
+    }
+    // 更新图谱节点数据
+    network.body.data.nodes.update([{
+      id: nodeId,
+      tags: updatedTags,
+      group: selectedNode.value.group,
+      label: selectedNode.value.label,
+      properties: selectedNode.value.properties
+    }]);
+    
+    alert('标签修改成功！');
+  } catch (error) {
+    console.error('修改标签失败:', error);
+    alert(`修改失败：${error.message}`);
+  }
+};
 
 // 获取用户信息
 const userInfo = ref(JSON.parse(localStorage.getItem('userInfo') || '{}'));
@@ -484,9 +827,19 @@ const nodeColorMap = {
   default: { background: '#DEE2E6', border: '#868E96', highlight: { background: '#F1F3F5' } }
 };
 
-// 所有节点类型（计算属性）
 const allNodeTypes = computed(() => {
-  const types = new Set(allNodes.value.map(node => node.group));
+  const types = new Set();
+  allNodes.value.forEach(node => {
+    // 1. 收集传统的 group 标签
+    if (node.group) types.add(node.group);
+    
+    // 2. 收集新增的 tags 数组中的所有标签
+    if (node.tags && Array.isArray(node.tags)) {
+      node.tags.forEach(t => {
+        if (t) types.add(t);
+      });
+    }
+  });
   return Array.from(types);
 });
 
@@ -496,6 +849,166 @@ const getNodeOriginalProperties = (node) => {
   return { ...node.properties };
 };
 
+// 新增：获取关系原始属性
+const getEdgeOriginalProperties = (edge) => {
+  if (!edge || !edge.properties) return {};
+  return { ...edge.properties };
+};
+
+// 新增：通过节点ID获取节点信息
+const getNodeById = (nodeId) => {
+  return allNodes.value.find(node => node.id === nodeId) || {};
+};
+
+// 新增：通过节点ID获取节点名称
+const getNodeLabelById = (nodeId) => {
+  const node = getNodeById(nodeId);
+  return node.label || `未知节点(${nodeId})`;
+};
+
+// 新增：切换关系属性展开/折叠
+const toggleEdgeExpand = (key) => {
+  const newSet = new Set(expandedEdgeKeys.value);
+  newSet.has(key) ? newSet.delete(key) : newSet.add(key);
+  expandedEdgeKeys.value = newSet;
+};
+
+// ========== 新增：关系属性增删改核心方法 ==========
+// 1. 校验关系属性名（限英文/数字/下划线，且不能重复）
+const validateEdgePropKey = () => {
+  const key = newEdgePropKey.value.trim();
+  const originalProps = getEdgeOriginalProperties(selectedEdge.value);
+  
+  // 空值校验
+  if (!key) {
+    edgePropKeyError.value = '属性名不能为空';
+    return;
+  }
+  
+  // 格式校验（仅英文、数字、下划线）
+  const reg = /^[a-zA-Z0-9_]+$/;
+  if (!reg.test(key)) {
+    edgePropKeyError.value = '属性名仅支持英文、数字、下划线';
+    return;
+  }
+  
+  // 重复校验
+  if (originalProps.hasOwnProperty(key)) {
+    edgePropKeyError.value = '该属性名已存在';
+    return;
+  }
+  
+  // 校验通过
+  edgePropKeyError.value = '';
+};
+
+// 2. 新增关系属性（需封装neo4jApi.addEdgeProperty）
+const addEdgeProperty = async () => {
+  if (!selectedEdge.value || !newEdgePropKey.value || edgePropKeyError.value) return;
+  
+  const edgeId = selectedEdge.value.id;
+  const propKey = newEdgePropKey.value.trim();
+  const propValue = newEdgePropValue.value.trim();
+  
+  try {
+    // 调用新增关系属性API（需确保neo4jApi中已实现）
+    await addEdgePropertyApi(edgeId, propKey, propValue);
+    
+    // 前端同步更新
+    selectedEdge.value.properties[propKey] = propValue;
+    network.body.data.edges.update([{
+      id: edgeId,
+      properties: { ...selectedEdge.value.properties }
+    }]);
+    
+    // 清空输入框
+    newEdgePropKey.value = '';
+    newEdgePropValue.value = '';
+    alert('关系属性新增成功！');
+  } catch (error) {
+    console.error('新增关系属性失败:', error);
+    alert(`新增失败：${error.message}`);
+  }
+};
+
+// 3. 修改关系属性（需封装neo4jApi.updateEdgeProperty）
+const editEdgeProperty = async (key) => {
+  if (!selectedEdge.value) return;
+  const currentValue = selectedEdge.value.properties[key];
+  const newValue = prompt(`编辑关系属性【${key}】`, currentValue);
+  
+  if (newValue === null) return; // 取消编辑
+  
+  const edgeId = selectedEdge.value.id;
+  try {
+    // 调用修改关系属性API
+    await updateEdgePropertyApi(edgeId, key, newValue);
+    
+    // 前端同步更新
+    selectedEdge.value.properties[key] = newValue;
+    network.body.data.edges.update([{
+      id: edgeId,
+      properties: { ...selectedEdge.value.properties }
+    }]);
+    alert('关系属性修改成功！');
+  } catch (error) {
+    console.error('修改关系属性失败:', error);
+    alert(`修改失败：${error.message}`);
+  }
+};
+
+// 删除关系属性核心方法（命名：deleteEdgeProperty）
+const deleteEdgeProperty = async (key) => {
+  if (!selectedEdge.value) {
+    alert('请先选择要操作的关系！');
+    return;
+  }
+
+  // 二次确认，防止误删
+  const confirmDelete = confirm(`确认删除关系属性【${key}】吗？删除后无法恢复！`);
+  if (!confirmDelete) return;
+
+  const edgeId = selectedEdge.value.id;
+  try {
+    await deleteEdgePropertyApi(edgeId, key);
+    
+    // 前端同步更新：删除属性后从本地数据中移除该属性
+    delete selectedEdge.value.properties[key];
+    network.body.data.edges.update([{
+      id: edgeId,
+      properties: { ...selectedEdge.value.properties }
+    }]);
+    
+    alert(`关系属性【${key}】删除成功！`);
+  } catch (error) {
+    console.error('删除关系属性失败:', error);
+    // 兼容后端返回的错误信息
+    const errorMsg = error.response?.data?.message || error.message || '删除失败';
+    alert(`删除失败：${errorMsg}`);
+  }
+};
+
+// 5. 删除关系（需封装neo4jApi.deleteEdge）
+const deleteEdge = async () => {
+  if (!selectedEdge.value) return;
+  const edgeLabel = `${getNodeLabelById(selectedEdge.value.from)} → ${selectedEdge.value.label} → ${getNodeLabelById(selectedEdge.value.to)}`;
+  if (!confirm(`确定删除关系【${edgeLabel}】吗？此操作不可恢复！`)) return;
+  
+  const edgeId = selectedEdge.value.id;
+  try {
+    // 调用删除关系API
+    await deleteEdgeApi(edgeId);
+    
+    // 前端同步更新
+    allEdges.value = allEdges.value.filter(edge => edge.id !== edgeId);
+    network.body.data.edges.remove(edgeId);
+    selectedEdge.value = null;
+    alert('关系删除成功！');
+  } catch (error) {
+    console.error('删除关系失败:', error);
+    alert(`删除失败：${error.message}`);
+  }
+};
 
 // 核心修改1：提取本地路径的图片/视频属性（适配image_path/video_path字段）
 const getLocalMediaProperties = (node) => {
@@ -587,58 +1100,157 @@ const toggleFilterType = (type) => {
   filteredTypes.value = newTypes;
 };
 
+// 变量定义区
+const searchResults = ref([]); 
+// 专门存放匹配到的关系对象
+const relationSearchResults = ref([]); 
+
 // 重置搜索
 const resetSearch = () => {
   searchKeyword.value = '';
-  highlightedNodeId.value = null;
+  searchType.value = 'name';
   filteredTypes.value = [];
-  if (network && allNodes.value.length > 0) {
-    network.body.data.nodes.update(allNodes.value.map(node => ({
-      id: node.id,
-      color: node.originalColor,
-      size: 30
-    })));
-  }
+  searchResults.value = [];
+  relationSearchResults.value = [];
+  highlightedNodeId.value = null;
 };
 
-// 处理搜索
-const handleSearch = () => {
+// 彻底重写搜索核心逻辑 ---
+const handleSearch = async () => {
   if (!searchKeyword.value.trim()) {
-    resetSearch();
+    alert('请输入搜索内容');
     return;
   }
+
+  loading.value = true;
+  try {
+    // 根据 searchType 执行不同搜索逻辑（核心：不修改 searchType）
+    switch (searchType.value) {
+      case 'name': // 节点名称
+        searchResults.value = allNodes.value.filter(node => 
+          node.label.toLowerCase().includes(searchKeyword.value.toLowerCase())
+        );
+        relationSearchResults.value = [];
+        break;
+      // 找到 handleSearch 函数中的 switch (searchType.value)
+      case 'group':
+        searchResults.value = allNodes.value.filter(node => {
+                const keyword = searchKeyword.value.toLowerCase();
+          // 同时检查 group 字段和 tags 数组中的每一个标签
+          const matchGroup = node.group && node.group.toLowerCase().includes(keyword);
+          const matchTags = Array.isArray(node.tags) && node.tags.some(t => t.toLowerCase().includes(keyword));
+          return matchGroup || matchTags;
+        });
+        relationSearchResults.value = [];
+  break;
+      case 'property': // 节点属性值
+        searchResults.value = allNodes.value.filter(node => {
+          if (!node.properties) return false;
+          return Object.values(node.properties).some(val => {
+            const strVal = String(val).toLowerCase();
+            return strVal.includes(searchKeyword.value.toLowerCase());
+          });
+        });
+        relationSearchResults.value = [];
+        break;
+      case 'edgeLabel': // 关系类型
+        relationSearchResults.value = allEdges.value.filter(edge => 
+          edge.label.toLowerCase().includes(searchKeyword.value.toLowerCase())
+        );
+        searchResults.value = [];
+        break;
+      case 'edgeProperty': // 关系属性值
+        relationSearchResults.value = allEdges.value.filter(edge => {
+          if (!edge.properties) return false;
+          return Object.values(edge.properties).some(val => {
+            const strVal = String(val).toLowerCase();
+            return strVal.includes(searchKeyword.value.toLowerCase());
+          });
+        });
+        searchResults.value = [];
+        break;
+      default:
+        searchResults.value = [];
+        relationSearchResults.value = [];
+    }
+  } catch (error) {
+    console.error('搜索失败:', error);
+    alert('搜索失败：' + error.message);
+  } finally {
+    loading.value = false;
+  }
 };
 
-// 搜索结果（多类型模糊匹配）
-const searchResults = computed(() => {
-  if (!searchKeyword.value.trim()) return [];
-  const keyword = searchKeyword.value.toLowerCase().trim();
+// 关系详情跳转方法
+const showEdgeDetail = (edge) => {
+  selectedEdge.value = edge; // 选中该关系，触发右侧详情面板显示
+  selectedNode.value = null; // 清空节点选中（避免冲突）
   
-  // 先筛选类型
-  let filteredNodes = [...allNodes.value];
-  if (filteredTypes.value.length > 0) {
-    filteredNodes = filteredNodes.filter(node => filteredTypes.value.includes(node.group));
+  // 可选：高亮关系对应的两个节点（提升交互体验）
+  highlightedNodeId.value = edge.from;
+  setTimeout(() => {
+    highlightedNodeId.value = edge.to;
+  }, 500);
+  
+  // 可选：定位到该关系在图谱中的位置
+  if (network) {
+    network.focus(edge.id, { scale: 1.2, animation: true });
+    network.selectEdges([edge.id]); // 选中图谱中的关系线条
+  }
+};
+
+// 增加对搜索词和搜索类型的实时侦听
+watch([searchKeyword, searchType], ([newKeyword, newType]) => {
+  // 1. 如果切换了类型或清空了关键词，先彻底清空之前的搜索结果
+  searchResults.value = [];
+  relationSearchResults.value = [];
+
+  // 2. 如果关键词为空，直接返回，不再执行后续匹配逻辑
+  if (!newKeyword.trim()) {
+    return;
   }
 
-  // 根据搜索类型匹配
-  return filteredNodes.filter(node => {
-    switch (searchType.value) {
-      case 'name':
-        return node.label.toLowerCase().includes(keyword) || (node.properties?.name && node.properties.name.toLowerCase().includes(keyword));
-      case 'group':
-        return node.group.toLowerCase().includes(keyword);
-      case 'property':
-        const props = Object.values(node.properties || {});
-        return props.some(val => {
-          if (typeof val === 'string') return val.toLowerCase().includes(keyword);
-          if (Array.isArray(val)) return val.some(item => item.toString().toLowerCase().includes(keyword));
-          return val.toString().toLowerCase().includes(keyword);
-        });
-      default:
-        return false;
-    }
-  });
-});
+  // 3. 实时执行搜索匹配逻辑 (复用您已有的逻辑，但去掉 loading 和 alert 以提升体验)
+  const keyword = newKeyword.toLowerCase();
+  
+  switch (newType) {
+    case 'name':
+      searchResults.value = allNodes.value.filter(node => 
+        node.label.toLowerCase().includes(keyword)
+      );
+      break;
+    // 找到 watch([searchKeyword, searchType], ...) 中的 case 'group'
+    case 'group':
+      searchResults.value = allNodes.value.filter(node => {
+        const matchGroup = node.group && node.group.toLowerCase().includes(keyword);
+        const matchTags = node.tags && Array.isArray(node.tags) && 
+                     node.tags.some(tag => tag.toLowerCase().includes(keyword));
+        return matchGroup || matchTags;
+      });
+      break;
+    case 'property':
+      searchResults.value = allNodes.value.filter(node => {
+        if (!node.properties) return false;
+        return Object.values(node.properties).some(val => 
+          String(val).toLowerCase().includes(keyword)
+        );
+      });
+      break;
+    case 'edgeLabel':
+      relationSearchResults.value = allEdges.value.filter(edge => 
+        edge.label.toLowerCase().includes(keyword)
+      );
+      break;
+    case 'edgeProperty':
+      relationSearchResults.value = allEdges.value.filter(edge => {
+        if (!edge.properties) return false;
+        return Object.values(edge.properties).some(val => 
+          String(val).toLowerCase().includes(keyword)
+        );
+      });
+      break;
+  }
+}, { immediate: false });
 
 // 高亮并定位节点
 const highlightAndLocateNode = (node) => {
@@ -740,23 +1352,84 @@ const showRelatedNodes = () => {
 
   // 友好的提示弹窗
   alert(`【${selectedNode.value.label}】共找到 ${relatedNodeList.length} 个关联节点，${relatedEdges.length} 条关联关系
-已用黄色边框高亮显示关联节点，红色边框为当前选中节点`);
+  已用黄色边框高亮显示关联节点，红色边框为当前选中节点`);
 };
 
-// 导出数据（使用封装API）
+// 导出数据核心方法
 const exportData = async () => {
   try {
-    const blob = await exportGraphData();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `neo4j_graph_data_${new Date().getTime()}.json`;
-    a.click();
-    window.URL.revokeObjectURL(url);
+    loading.value = true;
+    
+    // 1. 整理节点数据（按指定格式）
+    const exportNodes = allNodes.value.map(node => {
+      // 节点属性处理：确保properties存在且为对象
+      const nodeProperties = node.properties || {};
+      return {
+        label: node.group || node.tags?.[0] || '未知标签', // 优先取group，无则取第一个tag
+        properties: {
+          // 确保name字段存在（优先取节点label）
+          name: node.label,
+          // 合并其他属性（过滤空值/undefined）
+          ...Object.entries(nodeProperties).reduce((acc, [key, value]) => {
+            if (value !== undefined && value !== null) {
+              acc[key] = value.toString() || '无'; // 空值统一替换为"无"
+            }
+            return acc;
+          }, {})
+        }
+      };
+    });
+
+    // 2. 整理关系数据（按指定格式）
+    const exportRelations = allEdges.value.map(edge => {
+      // 获取起始/终止节点信息
+      const startNode = getNodeById(edge.from);
+      const endNode = getNodeById(edge.to);
+      
+      // 关系属性处理
+      const edgeProperties = edge.properties || {};
+      return {
+        type: edge.label || '未知关系',
+        start_node_label: startNode.group || startNode.tags?.[0] || '未知标签',
+        start_node_name: startNode.label || '未知节点',
+        end_node_label: endNode.group || endNode.tags?.[0] || '未知标签',
+        end_node_name: endNode.label || '未知节点',
+        properties: Object.entries(edgeProperties).reduce((acc, [key, value]) => {
+          if (value !== undefined && value !== null) {
+            acc[key] = value.toString() || '无'; // 空值统一替换为"无"
+          }
+          return acc;
+        }, {})
+      };
+    });
+
+    // 3. 构建最终导出结构
+    const exportData = {
+      nodes: exportNodes,
+      relations: exportRelations
+    };
+
+    // 4. 生成JSON文件并下载
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { 
+      type: 'application/json; charset=utf-8' 
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `人形机器人知识图谱_${new Date().getTime()}.json`; // 带时间戳的文件名
+    document.body.appendChild(link);
+    link.click();
+    
+    // 清理资源
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
     alert('数据导出成功！');
   } catch (error) {
     console.error('导出数据失败:', error);
     alert(`导出失败：${error.message}`);
+  } finally {
+    loading.value = false;
   }
 };
 
@@ -917,6 +1590,7 @@ const initGraph = async () => {
         id: node.id,
         label: node.label || `节点${node.id}`,
         group: node.group || 'default',
+        tags: node.labels || node.tags || (node.group ? [node.group] : []),
         size: 30,
         properties: node.properties || {},
         color: nodeColor,
@@ -934,11 +1608,29 @@ const initGraph = async () => {
       properties: edge.properties || {}
     }));
 
-    // 图谱配置
+    // 图谱配置（新增关系交互配置）
     const options = {
       nodes: { shape: 'box', font: { size: 12, color: '#000', bold: true }, borderWidth: 2 },
-      edges: { color: '#666', font: { size: 10, color: '#000' }, arrows: { to: { enabled: true } }, smooth: false },
-      interaction: { dragNodes: true, dragView: true, zoomView: true, hover: true, selectable: true },
+      edges: { 
+        color: {
+          color: '#848484',
+          highlight: '#FF5722', // 关系选中时高亮色
+          hover: '#FF9800'
+        },
+        font: { size: 10, color: '#000' }, 
+        arrows: { to: { enabled: true } }, 
+        smooth: false,
+        selectionWidth: 2.5 // 选中关系时宽度
+      },
+      interaction: { 
+        dragNodes: true, 
+        dragView: true, 
+        zoomView: true, 
+        hover: true, 
+        selectable: true, // 允许选中关系
+        tooltipDelay: 200,
+        selectConnectedEdges: false // 点击节点时不选中关联边
+      },
       layout: { randomSeed: 42, improvedLayout: true, hierarchical: { enabled: false } },
       physics: {
         enabled: true,
@@ -953,19 +1645,40 @@ const initGraph = async () => {
     if (network) network.destroy();
     network = new Network(container, { nodes: allNodes.value, edges: allEdges.value }, options);
 
-    // 节点点击事件
+    // 节点&关系点击事件（整合原有节点逻辑 + 新增关系逻辑）
     network.on('click', (params) => {
+      // 清空原有选中状态
+      selectedNode.value = null;
+      selectedEdge.value = null;
+      highlightedNodeId.value = null;
+
+      // 节点点击逻辑（原有逻辑优化）
       if (params.nodes.length > 0) {
         const nodeId = params.nodes[0];
         const node = allNodes.value.find(n => n.id === nodeId);
         if (node) {
           selectedNode.value = { ...node };
-          if (highlightedNodeId.value !== nodeId) {
-            highlightAndLocateNode(node);
-          }
+          highlightAndLocateNode(node);
         }
+      }
+      
+      // 新增：关系点击逻辑
+      if (params.edges.length > 0) {
+        const edgeId = params.edges[0];
+        selectedEdge.value = allEdges.value.find(edge => edge.id === edgeId) || null;
+        // 可选：关系选中时高亮样式
+        network.body.data.edges.update([{
+          id: edgeId,
+          color: { highlight: '#FF5722' },
+          width: 3
+        }]);
       } else {
-        selectedNode.value = null;
+        // 未选中关系时恢复所有边默认样式
+        network.body.data.edges.update(allEdges.value.map(edge => ({
+          id: edge.id,
+          color: { highlight: '#FF5722' }, // 保留高亮色配置
+          width: 2
+        })));
       }
     });
 
@@ -1474,16 +2187,22 @@ onUnmounted(() => {
 }
 
 .node-header {
-  margin-bottom: 25px;
-  padding-bottom: 15px;
+  display: flex;         /* 开启弹性布局 */
+  align-items: center;   /* 垂直居中对齐 */
+  justify-content: space-between; /* 让名称在左，按钮在右 */
+  padding: 16px;
   border-bottom: 1px solid #eee;
+  gap: 12px;             /* 如果名称太长，设置两者之间的最小间距 */
 }
 
 .node-name {
-  font-size: 20px;
-  color: #2c3e50;
-  margin: 0 0 5px 0;
-  font-weight: 600;
+  margin: 0;             /* 必须清除 h2 默认的上下外边距，否则对齐会显得很怪 */
+  font-size: 24px;
+  font-weight: 700;
+  flex-shrink: 1;        /* 允许名称在空间不足时缩小 */
+  white-space: nowrap;   /* 防止名称过长时换行（可选） */
+  overflow: hidden;      /* 配合 ellipsis 使用 */
+  text-overflow: ellipsis; /* 名称过长显示省略号 */
 }
 
 .node-category {
@@ -2040,5 +2759,181 @@ onUnmounted(() => {
   display: inline-block;
   width: 110px; /* 微调宽度适配14px字体 */
 }
+
+.edge-match-tip {
+  color: #666;
+  font-size: 12px;
+  margin-left: 8px;
+  font-style: italic;
+}
+
+/* 关系详情栏样式（复用节点详情栏，仅修改类名） */
+.edge-detail-panel {
+  width: 420px; /* 和node-detail-panel宽度完全一致 */
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100%;
+  background: #fff;
+  box-shadow: -2px 0 10px rgba(0,0,0,0.1);
+  z-index: 1000;
+  transform: translateX(100%);
+  transition: transform 0.3s ease;
+}
+
+.edge-detail-panel.active {
+  transform: translateX(0);
+}
+.edge-header {
+  padding: 16px;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.edge-name {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.edge-category {
+  font-size: 14px;
+  color: #666;
+  margin-left: 8px;
+}
+.edge-node-links {
+  padding: 15px 20px;
+  border-bottom: 1px solid #eee;
+}
+
+.delete-edge-btn {
+  padding: 6px 12px;
+  border-radius: 4px;
+  background: #dc3545;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.delete-edge-btn:hover {
+  background: #bb2d3b;
+}
+
+.edge-match-tip {
+  color: #868E96;
+  font-size: 12px;
+  margin-left: 8px;
+}
+/* 保留原有样式 */
+.search-result {
+  margin-top: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid #e9ecef;
+  border-radius: 4px;
+  padding: 4px;
+}
+.result-item {
+  padding: 6px 8px;
+  cursor: pointer;
+  border-radius: 2px;
+}
+.result-item:hover {
+  background-color: #e9ecef;
+}
+.no-result {
+  margin-top: 8px;
+  color: #868E96;
+  padding: 8px;
+}
+
+/* 标签管理区域 */
+.node-tags-section {
+  margin: 16px 0;
+  padding: 12px;
+  border-radius: 4px;
+}
+.tags-title {
+  font-size: 16px;
+  margin-bottom: 8px;
+  color: #333;
+}
+.tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.tag-item {
+  display: flex;
+  align-items: center;
+  background: #e9ecef;
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+.tag-text {
+  margin-right: 4px;
+  color: #495057;
+}
+.tag-delete-btn {
+  font-size: 12px;
+  padding: 0 4px;
+  height: 20px;
+  line-height: 1;
+  margin-left: 4px;
+  border: none;
+  border-radius: 2px;
+  background: #dc3545;
+  color: white;
+  cursor: pointer;
+}
+.tag-delete-btn:disabled {
+  background: #ced4da;
+  cursor: not-allowed;
+}
+.tag-edit-btn {
+  font-size: 12px;
+  padding: 0 4px;
+  height: 20px;
+  line-height: 1;
+  margin-left: 4px;
+  border: none;
+  border-radius: 2px;
+  background: #007bff;
+  color: white;
+  cursor: pointer;
+}
+.add-tag-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.new-tag-input {
+  flex: 1;
+  min-width: 120px;
+  padding: 6px 8px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+}
+.add-tag-btn {
+  padding: 6px 12px;
+  background: #28a745;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.add-tag-btn:disabled {
+  background: #ced4da;
+  cursor: not-allowed;
+}
+
+
 
 </style>
