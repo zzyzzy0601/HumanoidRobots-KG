@@ -29,6 +29,9 @@ node server/index.js
 
 ## 项目结构
 ```
+前端：vue3+vite
+后端：node.js+express
+
 HumanoidRobots-KG/  <-- 项目根目录
 |
 +- package.json                  <-- 根目录npm配置文件
